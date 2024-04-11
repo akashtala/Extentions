@@ -49,4 +49,22 @@ extension UILabel {
         mutableAttributedString.addAttribute(NSAttributedString.Key.font, value: font, range: range)
         self.attributedText = mutableAttributedString
     }
+
+    func fitTextToBounds() {
+        guard let text = text, let currentFont = font else { return }
+    
+        let bestFittingFont = UIFont.bestFittingFont(for: text, in: bounds, fontDescriptor: currentFont.fontDescriptor, additionalAttributes: basicStringAttributes)
+        font = bestFittingFont
+    }
+    
+    private var basicStringAttributes: [NSAttributedStringKey: Any] {
+        var attribs = [NSAttributedStringKey: Any]()
+        
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = self.textAlignment
+        paragraphStyle.lineBreakMode = self.lineBreakMode
+        attribs[.paragraphStyle] = paragraphStyle
+        
+        return attribs
+    }
 }
