@@ -162,5 +162,31 @@ extension UIView {
 
             layer.position = position
             layer.anchorPoint = point
+    }
+    func downloadAsImage() -> UIImage? {
+        UIGraphicsBeginImageContext(CGSize(width: self.frame.size.width, height: self.frame.size.height))
+        self.drawHierarchy(in: CGRect(x: 0.0, y: 0.0, width: self.frame.size.width, height: self.frame.size.height), afterScreenUpdates: true)
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return image
+    }
+    
+    private func scale(by scale: CGFloat) {
+        self.contentScaleFactor = scale
+        for subview in self.subviews {
+            subview.scale(by: scale)
         }
+    }
+    
+    func takeScreenshot(with scale: CGFloat? = nil) -> UIImage {
+        let newScale = scale ?? UIScreen.main.scale
+        self.scale(by: newScale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = newScale
+        let renderer = UIGraphicsImageRenderer(size: self.bounds.size, format: format)
+        let image = renderer.image { rendererContext in
+            self.layer.render(in: rendererContext.cgContext)
+        }
+        return image
+    }
 }
