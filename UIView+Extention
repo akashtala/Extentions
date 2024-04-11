@@ -145,13 +145,6 @@ extension UIView {
         layer.removeAllAnimations()
     }
     
-    func setCustomization(frame: CGRect){
-        self.frame = frame
-        self.backgoundImage = UIImage(named: "Back")!
-        self.layer.cornerRadius = 10
-        self.clipsToBounds = true
-    }
-    
     func setAnchorPoint(_ point: CGPoint) {
             var newPoint = CGPoint(x: bounds.size.width * point.x, y: bounds.size.height * point.y)
             var oldPoint = CGPoint(x: bounds.size.width * layer.anchorPoint.x, y: bounds.size.height * layer.anchorPoint.y);
