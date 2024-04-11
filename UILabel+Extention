@@ -39,4 +39,14 @@ extension UILabel {
         }
         self.font = UIFont.systemFont(ofSize: fontSize)
     }
+
+   func highlight(_ text: String, color: UIColor, font:UIFont) {
+        guard let labelText = self.text else { return }
+        let range = (labelText as NSString).range(of: text)
+
+        let mutableAttributedString = NSMutableAttributedString.init(string: labelText)
+        mutableAttributedString.addAttribute(NSAttributedString.Key.foregroundColor, value: color, range: range)
+        mutableAttributedString.addAttribute(NSAttributedString.Key.font, value: font, range: range)
+        self.attributedText = mutableAttributedString
+    }
 }
