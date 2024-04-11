@@ -19,4 +19,24 @@ extension UILabel {
             self.textColor = color
         }
     }
+
+    func adjustFontSizeToFitLabel() {
+        guard let text = self.text, !text.isEmpty else { return }
+        let labelSize = self.frame.size
+        var fontSize: CGFloat = 100.0
+        while true {
+            let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: fontSize)]
+            let attributedText = NSAttributedString(string: text, attributes: attributes)
+            let rect = attributedText.boundingRect(with: CGSize(width: labelSize.width, height: .greatestFiniteMagnitude),
+                                                   options: .usesLineFragmentOrigin, context: nil)
+            if rect.size.width < labelSize.width && rect.size.height < labelSize.height {
+                break
+            }
+            fontSize -= 1.0
+            if fontSize < 10.0 {
+                break
+            }
+        }
+        self.font = UIFont.systemFont(ofSize: fontSize)
+    }
 }
