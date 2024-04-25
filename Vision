@@ -1,0 +1,86 @@
+import Vision
+
+extention ViewController{
+    public struct BackgroundRemover {
+    enum ImageExtractError: Error {
+        case noResultFromForegroundMaskRequest
+    }
+        
+    public static func removeBackground(from image: CIImage) throws -> CIImage {
+        let request = VNGenerateForegroundInstanceMaskRequest()
+        
+        let handler = VNImageRequestHandler(ciImage: image, options: [:])
+        try handler.perform([request])
+
+        guard let result = request.results?.first else {
+            throw ImageExtractError.noResultFromForegroundMaskRequest
+        }
+
+        let maskedImage = try result.generateMaskedImage(
+            ofInstances: result.allInstances,
+            from: handler,
+            croppedToInstancesExtent: true
+        )
+        
+        let image = CIImage(cvPixelBuffer: maskedImage)
+        return image
+    }
+}
+
+class FaceDetection{
+    static let shared = FaceDetection()
+    var imageResultHandler: VNImageRequestHandler!
+    var faceDetectionRequest: VNDetectFaceRectanglesRequest!
+    private init(){ }
+    
+    func checkFaceVisiblity(image: UIImage, complationHandler: @escaping (Bool?,String?) -> Void) {
+            guard let ciImage = CIImage(image: image) else {
+                print("Failed to convert UIImage to CIImage")
+                return
+            }
+            faceDetectionRequest = VNDetectFaceRectanglesRequest { request, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        complationHandler(nil,error.localizedDescription)
+                    } else if let faces = request.results as? [VNFaceObservation], let faceObservation = faces.first{
+                        if faces.count == 1{
+                            // MARK: Compare size of face according scale of image
+                            let imageSize = image.size
+                            let faceBounds = faceObservation.boundingBox
+                            let faceSize = CGSize(width: faceBounds.width * imageSize.width, height: faceBounds.height * imageSize.height)
+                            let avg = (imageSize.width + imageSize.height) / 2
+                            let minFaceSize: CGFloat = avg / 5 // Minimum face size in pixels
+                            let maxFaceSize: CGFloat = avg / 2 // Maximum face size in pixels
+                            let isFaceProperlyVisible = faceSize.width >= minFaceSize && faceSize.width <= maxFaceSize &&
+                        faceSize.height >= minFaceSize && faceSize.height <= maxFaceSize &&
+                        faceBounds.minX > 0.1 && faceBounds.maxX < 0.9 && // Check horizontal position
+                        faceBounds.minY > 0.1 && faceBounds.maxY < 0.9    // Check vertical position
+                        
+                        // MARK: Check rotation of image it acept
+                        let rollAngle = faceObservation.roll as? Float ?? 0  // For check looking at left or right
+                        let pitchAngle = faceObservation.pitch as? Float ?? 0 // For checking looking at up or down
+                        let yawAngle = faceObservation.yaw as? Float ?? 0  // For checking looking at left sholder or right one
+                        if abs(rollAngle) < 0.1 && abs(pitchAngle) < 0.3 && abs(yawAngle) < 0.5{
+                            complationHandler(isFaceProperlyVisible && true, nil)
+                        } else {
+                            complationHandler(nil, "Face is not proper visible")
+                        }
+                    } else {
+                        complationHandler(nil,"More then One Person")
+                    }
+                }
+            }
+        }
+        // MARK: check it in device by removing it
+        faceDetectionRequest.usesCPUOnly = true
+        
+        let imageResultHandler = VNImageRequestHandler(ciImage: ciImage, options: [:])
+        do {
+            try imageResultHandler.perform([faceDetectionRequest])
+        } catch let error {
+            complationHandler(nil,error.localizedDescription)
+        }
+    }
+}
+
+}
