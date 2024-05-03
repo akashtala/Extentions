@@ -1,0 +1,34 @@
+import Foundation
+import UIKit
+
+let isIpad = UIDevice.current.userInterfaceIdiom == .pad
+let scaleRatio = isIpad ? 1.5 : 1
+
+extension UILabel {
+    open override func awakeFromNib() {
+        // Control font size of label if is ipad then increase font size
+        let height = UIApplication.shared.windows.first{$0.isKeyWindow }?.safeAreaInsets.bottom ?? 0.0
+        if isIpad {
+            var newFont = scaleRatio * self.font.pointSize
+            self.font = self.font.withSize(newFont)
+        }else if height == 0{
+            var newFont = 0.8 * self.font.pointSize
+            self.font = self.font.withSize(newFont)
+        }
+    }
+}
+
+extension UIImageView{
+    open override func awakeFromNib() {
+        // Increase image height and width in ipad if user added identifier in constraint
+        let filteredConstraints = self.constraints.filter { $0.identifier == "image_width"}
+        if let width = filteredConstraints.first {
+            width.constant = width.constant * scaleRatio
+        }
+        
+        let filteredHeightConstraints = self.constraints.filter { $0.identifier == "image_height"}
+        if let height = filteredHeightConstraints.first {
+            height.constant = height.constant * scaleRatio
+        }
+    }
+}
