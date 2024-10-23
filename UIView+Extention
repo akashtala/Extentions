@@ -2,6 +2,9 @@
 
 import UIKit
 
+private var topRightRadiusKey: UInt8 = 0
+private var bottomLeftRadiusKey: UInt8 = 0
+
 //MARK: UIVIEW
 extension UIView {
     
@@ -190,4 +193,59 @@ extension UIView {
         }
         return image
     }
+
+    @IBInspectable var topRightRadius: CGFloat {
+          get {
+              return objc_getAssociatedObject(self, &topRightRadiusKey) as? CGFloat ?? 0
+          }
+          set {
+              objc_setAssociatedObject(self, &topRightRadiusKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+              applyCorners()
+          }
+      }
+      
+      @IBInspectable var bottomLeftRadius: CGFloat {
+          get {
+              return objc_getAssociatedObject(self, &bottomLeftRadiusKey) as? CGFloat ?? 0
+          }
+          set {
+              objc_setAssociatedObject(self, &bottomLeftRadiusKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+              applyCorners()
+          }
+      }
+      
+      private func applyCorners() {
+          let path = UIBezierPath()
+
+          // Top-left corner (no rounding here)
+          path.move(to: CGPoint(x: 0, y: 0))
+          
+          // Top-right corner rounding
+          if topRightRadius > 0 {
+              path.addLine(to: CGPoint(x: bounds.width - topRightRadius, y: 0))
+              path.addArc(withCenter: CGPoint(x: bounds.width - topRightRadius, y: topRightRadius), radius: topRightRadius, startAngle: -.pi / 2, endAngle: 0, clockwise: true)
+          } else {
+              path.addLine(to: CGPoint(x: bounds.width, y: 0))
+          }
+          
+          // Bottom-right corner (no rounding here)
+          path.addLine(to: CGPoint(x: bounds.width, y: bounds.height))
+          
+          // Bottom-left corner rounding
+          if bottomLeftRadius > 0 {
+              path.addLine(to: CGPoint(x: bottomLeftRadius, y: bounds.height))
+              path.addArc(withCenter: CGPoint(x: bottomLeftRadius, y: bounds.height - bottomLeftRadius), radius: bottomLeftRadius, startAngle: .pi / 2, endAngle: .pi, clockwise: true)
+          } else {
+              path.addLine(to: CGPoint(x: 0, y: bounds.height))
+          }
+          
+          // Complete path
+          path.addLine(to: CGPoint(x: 0, y: 0))
+          path.close()
+
+          // Apply the mask
+          let mask = CAShapeLayer()
+          mask.path = path.cgPath
+          layer.mask = mask
+      }
 }
