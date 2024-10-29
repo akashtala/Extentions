@@ -1,9 +1,3 @@
-//
-//  Navigation+Extention.swift
-//
-//  Created by Akash on 01/04/24.
-//
-
 import Foundation
 import UIKit
 
@@ -25,7 +19,7 @@ enum TransitionType: String{
 extension UINavigationController{
     func customPush(_ viewController: UIViewController, transitionType: TransitionType, animated: Bool) {
         let transition = CATransition()
-        transition.duration = 0.7
+        transition.duration = 0.5
         transition.type = CATransitionType(rawValue: transitionType.rawValue)
         view.layer.add(transition, forKey: nil)
         pushViewController(viewController, animated: false)
@@ -33,7 +27,7 @@ extension UINavigationController{
     
     func customPresent(_ viewControllerToPresent: UIViewController, transitionType: TransitionType, animated: Bool) {
         let transition = CATransition()
-        transition.duration = 0.7
+        transition.duration = 0.5
         transition.type = CATransitionType(rawValue: transitionType.rawValue)
         view.window?.layer.add(transition, forKey: kCATransition)
         present(viewControllerToPresent, animated: false)
@@ -41,9 +35,31 @@ extension UINavigationController{
     
     func popViewController(transitionType: TransitionType, animated: Bool){
         let transition = CATransition()
-        transition.duration = 0.7
+        transition.duration = 0.5
         transition.type = CATransitionType(rawValue: transitionType.rawValue)
         view.window?.layer.add(transition, forKey: kCATransition)
         popViewController(animated: false)
+    }
+    
+    func setRootViewController(viewController: UIViewController, withAnimation animation: UIView.AnimationOptions = .transitionFlipFromRight) {
+        guard let window = UIApplication.shared.delegate?.window as? UIWindow else {
+            return
+        }
+
+        let navigationController = UINavigationController(rootViewController: viewController)
+        navigationController.navigationBar.isHidden = true
+        
+        UIView.transition(with: window, duration: 0.5, options: animation, animations: {
+            window.rootViewController = navigationController
+        }, completion: nil)
+    }
+    
+    func popToViewController<ViewControllerType: UIViewController>(_ type: ViewControllerType.Type, animated: Bool) {
+        for eachVC in self.viewControllers {
+            if eachVC.isKind(of: type.self) {
+                self.popToViewController(eachVC, animated: animated)
+                break
+            }
+        }
     }
 }
