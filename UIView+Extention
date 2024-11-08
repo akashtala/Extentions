@@ -248,4 +248,18 @@ extension UIView {
           mask.path = path.cgPath
           layer.mask = mask
       }
+
+    private struct AssociatedKeys {
+        static var stringTag = ObjectIdentifier(String.self)
+    }
+    
+    // Setter for the string tag
+    var stringTag: String? {
+        get {
+            return objc_getAssociatedObject(self, &AssociatedKeys.stringTag) as? String
+        }
+        set {
+            objc_setAssociatedObject(self, &AssociatedKeys.stringTag, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+    }
 }
