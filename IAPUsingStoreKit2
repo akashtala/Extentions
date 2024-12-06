@@ -1,0 +1,175 @@
+import StoreKit
+
+typealias SuccessCallBack = () -> Void
+typealias FailureCallBack = (String) -> Void
+
+enum PurchaseError {
+    case pending
+    case userCancelled
+    case unknown
+    case error(String)
+}
+
+final class IAPManager {
+    static let shared = IAPManager()
+    private init() { }
+    
+    private var products: [Product] = []
+    private var isProductLoaded: Bool = false
+}
+
+// MARK: - Transaction Listener Method
+extension IAPManager {
+    func listenForTransactionUpdates() {
+        Task {
+            // Whenever changes happen like refund or cancel transaction then this method occurs or verification is pending of transaction
+            for await verificationResult in Transaction.updates {
+                handleTransaction(verificationResult)
+            }
+        }
+    }
+    
+    private func handleTransaction(_ verificationResult: VerificationResult<Transaction>) {
+        switch verificationResult {
+        case .verified(let transaction):
+            debugPrint("Verified transaction for product: \(transaction.productID)")
+            print(transaction)
+            Task {
+                await transaction.finish()
+                self.updateTransactionFeatures(success: { _ in
+                    
+                }, failure: { _ in
+                    
+                })
+            }
+        case .unverified(_, let error):
+            debugPrint("Unverified transaction: \(error)")
+        }
+    }
+}
+
+// MARK: - Product load and purchase
+extension IAPManager {
+    func loadProducts(productIDs: [String], success: (SuccessCallBack)? = nil, failure:  (FailureCallBack)? = nil) {
+        Task {
+            do {
+                self.products = try await Product.products(for: productIDs)
+                    .sorted(by: { $0.price > $1.price })
+                self.isProductLoaded = true
+                success?()
+            } catch {
+                debugPrint(error.localizedDescription)
+                failure?(error.localizedDescription)
+            }
+        }
+    }
+    
+    func purchaseProduct(_ product: Product, success: @escaping ([String]) -> Void, failure: @escaping (PurchaseError) -> Void) {
+        Task {
+            do {
+                let result = try await product.purchase()
+                switch result {
+                case let .success(.verified(transaction)):
+                    await transaction.finish()
+                    debugPrint("Completed purchase with Transaction: \(transaction)")
+                    if transaction.productType == .consumable {
+                        success([product.id])
+                        return
+                    }
+                    self.updateTransactionFeatures(success: { allPurchasedProductIds in
+                        if allPurchasedProductIds.contains(product.id) {
+                            success([product.id])
+                        } else {
+                            // Show Purchase Fail Error
+                        }
+                    }, failure: { error in
+                        failure(PurchaseError.error(error))
+                    })
+                case let .success(.unverified(_, error)):
+                    debugPrint("Unverified purchase. Might be jailbroken. Error: \(error.localizedDescription)")
+                    failure(PurchaseError.error(error.localizedDescription))
+                    break
+                case .pending:
+                    failure(PurchaseError.pending)
+                    break
+                case .userCancelled:
+                    debugPrint("User Cancelled!")
+                    failure(PurchaseError.userCancelled)
+                    break
+                @unknown default:
+                    debugPrint("Failed to purchase the product!")
+                    failure(PurchaseError.unknown)
+                }
+            } catch {
+                debugPrint("Failed to purchase the product!")
+                failure(PurchaseError.error(error.localizedDescription))
+            }
+        }
+    }
+}
+
+// MARK: - Get Current Active Transaction
+extension IAPManager {
+    func updateTransactionFeatures(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
+        var purchasedPlanIds: Set<String> = []
+        Task {
+            for await result in Transaction.currentEntitlements {
+                switch result {
+                case .verified(let transaction):
+                    debugPrint(transaction)
+                    purchasedPlanIds.insert(transaction.productID)
+                case .unverified(_, let error):
+                    debugPrint("Verification Failed: \(error.localizedDescription)")
+                    break
+                }
+            }
+            purchasedPlanIds.isEmpty ? failure("No plan purchased before") : success(Array(purchasedPlanIds))
+        }
+    }
+}
+
+// MARK: - Restore Purchase
+extension IAPManager {
+    func restorePurchases(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
+        Task {
+            do {
+                try await AppStore.sync()
+                self.updateTransactionFeatures(success: { purchasedProductIds in
+                    success(purchasedProductIds)
+                }, failure: { error in
+                    failure(error)
+                })
+            } catch {
+                debugPrint(error.localizedDescription)
+                failure(error.localizedDescription)
+            }
+        }
+    }
+}
+
+// MARK: - Promotional Offer Handler
+extension IAPManager {
+    @available(iOS 16.4, *)
+    func handlePromotionalOffer(success: @escaping ([String]) -> Void, failure: @escaping (PurchaseError) -> Void) {
+        Task {
+            for await purchaseIntent in PurchaseIntent.intents {
+                self.purchaseProduct(purchaseIntent.product, success: { purchasedProductIds in
+                    if purchasedProductIds.contains(purchaseIntent.id) {
+                        success([purchaseIntent.id])
+                    } else {
+                        failure(PurchaseError.error("Something went wrong"))
+                    }
+                }, failure: { error in
+                    failure(error)
+                })
+            }
+        }
+    }
+}
+
+// MARK: - ProductData Fetching
+extension IAPManager {
+    func getProductsData() -> [Product] {
+        return self.products
+    }
+}
