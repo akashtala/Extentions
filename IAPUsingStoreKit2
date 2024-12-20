@@ -16,6 +16,12 @@ enum ProductLoadError {
     case error(String)
 }
 
+enum RestoreError {
+    case expired
+    case neverPurchased
+    case error(String)
+}
+
 final class IAPManager {
     static let shared = IAPManager()
     private var products: [Product] = []
@@ -175,14 +181,34 @@ extension IAPManager {
             purchasedPlanIds.isEmpty ? failure("No plan purchased before") : success(Array(purchasedPlanIds))
         }
     }
+    
+    /// This Function get all transaction details
+    /// This function success callback return all purchased plan id
+    /// This function failure callback return error message that user never purchased anything
+    func allTransactionOfUser(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
+        Task {
+            var allPurchasedProductIds: Set<String> = []
+            for await result in Transaction.all {
+                switch result {
+                case .unverified(_, let error):
+                    debugPrint("Unverified Error: \(error.localizedDescription)")
+                    break
+                case .verified(let transaction):
+                    allPurchasedProductIds.insert(transaction.productID)
+                }
+            }
+            allPurchasedProductIds.isEmpty ? failure("No Plan Purchased before") : success(Array(allPurchasedProductIds))
+        }
+    }
 }
 
 // MARK: - Restore Purchase
 extension IAPManager {
+    
     /// This function is for restore purchase
     /// This functions success callback return available productIds that is currently active
     /// This function failure callback return error message if no plan has found in user account
-    func restorePurchases(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
+    func restorePurchases(success: @escaping ([String]) -> Void, failure: @escaping ((RestoreError) -> Void)) {
         Task {
             do {
                 try await AppStore.sync()
@@ -191,14 +217,20 @@ extension IAPManager {
                         success(purchasedProductIds)
                     }
                 }, failure: { error in
-                    DispatchQueue.main.async {
-                        failure(error)
-                    }
+                    self.allTransactionOfUser(success: { _ in
+                        DispatchQueue.main.async {
+                            failure(.expired)
+                        }
+                    }, failure: { _ in
+                        DispatchQueue.main.async {
+                            failure(.neverPurchased)
+                        }
+                    })
                 })
             } catch {
                 debugPrint(error.localizedDescription)
                 DispatchQueue.main.async {
-                    failure(error.localizedDescription)
+                    failure(.error(error.localizedDescription))
                 }
             }
         }
