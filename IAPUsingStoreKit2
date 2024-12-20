@@ -18,51 +18,59 @@ enum ProductLoadError {
 
 final class IAPManager {
     static let shared = IAPManager()
-    private init() { }
-    
     private var products: [Product] = []
     var isProductLoaded: Bool = false
+    
+    private init() {
+        self.doInitSetup()
+    }
+    
+    private func doInitSetup() {
+        self.listenForTransactionUpdates()
+        if #available(iOS 16.4, *) {
+            self.handlePromotionalOffer(success: { _ in
+                
+            }, failure: { _ in
+                
+            })
+        }
+    }
 }
 
 // MARK: - Transaction Listener Method
 extension IAPManager {
+    
+    ///  This Method Listen about pending transaction or some refund transaction so here we can finish that transaction
     func listenForTransactionUpdates() {
         Task {
-            // Whenever changes happen like refund or cancel transaction then this method occurs or verification is pending of transaction
             for await verificationResult in Transaction.updates {
-                handleTransaction(verificationResult)
+                switch verificationResult {
+                case .verified(let transaction):
+                    Task {
+                        await transaction.finish()
+                    }
+                case .unverified(_, let error):
+                    debugPrint("Unverified transaction: \(error.localizedDescription)")
+                }
             }
-        }
-    }
-    
-    private func handleTransaction(_ verificationResult: VerificationResult<Transaction>) {
-        switch verificationResult {
-        case .verified(let transaction):
-            debugPrint("Verified transaction for product: \(transaction.productID)")
-            Task {
-                await transaction.finish()
-                self.updateTransactionFeatures(success: { _ in
-                    
-                }, failure: { _ in
-                    
-                })
-            }
-        case .unverified(_, let error):
-            debugPrint("Unverified transaction: \(error)")
         }
     }
 }
 
 // MARK: - Product load and purchase
 extension IAPManager {
-    func loadProducts(productIDs: [String], success: (SuccessCallBack)? = nil, failure: ((ProductLoadError) -> Void)? = nil) {
+    
+    /// This Method help to load Products with productIDs supplied in argument
+    /// It will return all available Products in success callback
+    /// It will return failure in enum if no product loaded Then inValidProductIds if some product is loaded then return Ids of product that not loaded and error if some error occurs in between execution
+    func loadProducts(productIDs: [String], success: (([Product]) -> Void)? = nil, failure: ((ProductLoadError) -> Void)? = nil) {
         Task {
             do {
                 self.products = try await Product.products(for: productIDs)
                 DispatchQueue.main.async {
                     if self.products.count == productIDs.count {
                         self.isProductLoaded = true
-                        success?()
+                        success?(self.products)
                     } else if self.products.isEmpty {
                         failure?(ProductLoadError.inValidProductIds)
                     } else {
@@ -80,56 +88,56 @@ extension IAPManager {
         }
     }
     
+    /// This function is for purchase Product
+    /// This function success completion return current product id if purchase success and verified
+    ///  This function failure return PurchaseError enum if transaction have any problem or successful transaction cant verify then it simply return in error variable or if transaction get pending or userCanceled or unknown then return according it
     func purchaseProduct(_ product: Product, success: @escaping ([String]) -> Void, failure: @escaping (PurchaseError) -> Void) {
         Task {
             do {
                 let result = try await product.purchase()
-                switch result {
-                case let .success(.verified(transaction)):
-                    await transaction.finish()
-                    debugPrint("Completed purchase with Transaction: \(transaction)")
-                    ///For the consumable products only
-                    if transaction.productType == .consumable {
-                        DispatchQueue.main.async {
-                            success([product.id])
-                        }
-                        return
-                    }
-                    self.updateTransactionFeatures(success: { allPurchasedProductIds in
-                        if allPurchasedProductIds.contains(product.id) {
-                            DispatchQueue.main.async {
-                                success([product.id])
+                DispatchQueue.main.async {
+                    switch result {
+                    case let .success(.verified(transaction)):
+                        Task {
+                            await transaction.finish()
+                            debugPrint("Completed purchase with Transaction: \(transaction)")
+                            
+                            /// For the consumable products only because currentEntitlements not return consumable products
+                            if transaction.productType == .consumable {
+                                DispatchQueue.main.async {
+                                    success([product.id])
+                                }
+                                return
                             }
-                        } else {
-                            DispatchQueue.main.async {
-                                failure(PurchaseError.unknown)
-                            }
+                            
+                            /// Here we add currentEntitlements so we can re-verify about purchase and unlock premium according that
+                            self.updateTransactionFeatures(success: { allPurchasedProductIds in
+                                DispatchQueue.main.async {
+                                    if allPurchasedProductIds.contains(product.id) {
+                                        success([product.id])
+                                    } else {
+                                        failure(PurchaseError.unknown)
+                                    }
+                                }
+                            }, failure: { error in
+                                DispatchQueue.main.async {
+                                    failure(PurchaseError.error(error))
+                                }
+                            })
                         }
-                    }, failure: { error in
-                        DispatchQueue.main.async {
-                            failure(PurchaseError.error(error))
-                        }
-                    })
-                case let .success(.unverified(_, error)):
-                    debugPrint("Unverified purchase. Might be jailbroken. Error: \(error.localizedDescription)")
-                    DispatchQueue.main.async {
+                    case let .success(.unverified(_, error)):
+                        debugPrint("Unverified purchase. Might be jailbroken. Error: \(error.localizedDescription)")
                         failure(PurchaseError.error(error.localizedDescription))
-                    }
-                    break
-                case .pending:
-                    DispatchQueue.main.async {
+                        break
+                    case .pending:
                         failure(PurchaseError.pending)
-                    }
-                    break
-                case .userCancelled:
-                    debugPrint("User Cancelled!")
-                    DispatchQueue.main.async {
+                        break
+                    case .userCancelled:
+                        debugPrint("User Cancelled!")
                         failure(PurchaseError.userCancelled)
-                    }
-                    break
-                @unknown default:
-                    debugPrint("Failed to purchase the product!")
-                    DispatchQueue.main.async {
+                        break
+                    @unknown default:
+                        debugPrint("Failed to purchase the product!")
                         failure(PurchaseError.unknown)
                     }
                 }
@@ -145,6 +153,10 @@ extension IAPManager {
 
 // MARK: - Get Current Active Transaction
 extension IAPManager {
+    
+    /// This function fetch all active transaction
+    /// This functions success callback return productIds of currently active plans
+    /// This function failure callback return failure message if no plan has been purchased or verified transaction is currently not active
     func updateTransactionFeatures(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
         UserManager.shared.setUserType(type: .free)
         Task {
@@ -167,6 +179,9 @@ extension IAPManager {
 
 // MARK: - Restore Purchase
 extension IAPManager {
+    /// This function is for restore purchase
+    /// This functions success callback return available productIds that is currently active
+    /// This function failure callback return error message if no plan has found in user account
     func restorePurchases(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
         Task {
             do {
@@ -192,19 +207,17 @@ extension IAPManager {
 
 // MARK: - Promotional Offer Handler
 extension IAPManager {
+    
+    /// This is for promotional purchase
+    /// This function return success completion for productId of try to purchase product if purchased successfully
+    /// This function return failure completion for any error in purchase
     @available(iOS 16.4, *)
     func handlePromotionalOffer(success: @escaping ([String]) -> Void, failure: @escaping (PurchaseError) -> Void) {
         Task {
             for await purchaseIntent in PurchaseIntent.intents {
                 self.purchaseProduct(purchaseIntent.product, success: { purchasedProductIds in
-                    if purchasedProductIds.contains(purchaseIntent.id) {
-                        DispatchQueue.main.async {
-                            success([purchaseIntent.id])
-                        }
-                    } else {
-                        DispatchQueue.main.async {
-                            failure(PurchaseError.error("Something went wrong"))
-                        }
+                    DispatchQueue.main.async {
+                        success(purchasedProductIds)
                     }
                 }, failure: { error in
                     DispatchQueue.main.async {
@@ -218,6 +231,8 @@ extension IAPManager {
 
 // MARK: - ProductData Fetching
 extension IAPManager {
+    
+    /// This function return available product list
     func getProductsData() -> [Product] {
         return self.products
     }
