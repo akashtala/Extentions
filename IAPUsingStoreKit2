@@ -1,25 +1,24 @@
 import StoreKit
 
 typealias FailureCallBack = (String) -> Void
-typealias SuccessCallBack = () -> Void
-
-enum PurchaseError {
-    case pending
-    case userCancelled
-    case unknown
-    case error(String)
-}
 
 enum ProductLoadError {
-    case inValidProductIds
-    case notLoadedProductIds([String])
-    case error(String)
+    case inValidProductIds /// This case happens whenever productId passed was mismatch with original productIds
+    case notLoadedProductIds([String]) /// This case happen while some product not load and return that product id
+    case error(String) /// This case return error message
+}
+
+enum PurchaseError {
+    case pending  /// This case return if transaction goes in pending state
+    case userCancelled /// This case happen if user cancel purchase while purchasing product
+    case unknown /// This case happen if can't identify error
+    case error(String) /// This case return error message
 }
 
 enum RestoreError {
-    case expired
-    case neverPurchased
-    case error(String)
+    case expired /// This case happen if user try restore and purchased was expired
+    case neverPurchased /// This case happen if user never purchased any product
+    case error(String) /// This case return error message
 }
 
 final class IAPManager {
@@ -32,7 +31,10 @@ final class IAPManager {
     }
     
     private func doInitSetup() {
+        /// Initialise transaction update for listen any transaction update
         self.listenForTransactionUpdates()
+        
+        /// Initialise handler for promotional offer
         if #available(iOS 16.4, *) {
             self.handlePromotionalOffer(success: { _ in
                 
@@ -47,7 +49,7 @@ final class IAPManager {
 extension IAPManager {
     
     ///  This Method Listen about pending transaction or some refund transaction so here we can finish that transaction
-    func listenForTransactionUpdates() {
+    private func listenForTransactionUpdates() {
         Task {
             for await verificationResult in Transaction.updates {
                 switch verificationResult {
@@ -117,7 +119,7 @@ extension IAPManager {
                             }
                             
                             /// Here we add currentEntitlements so we can re-verify about purchase and unlock premium according that
-                            self.updateTransactionFeatures(success: { allPurchasedProductIds in
+                            self.getActivePlan(success: { allPurchasedProductIds in
                                 DispatchQueue.main.async {
                                     if allPurchasedProductIds.contains(product.id) {
                                         success([product.id])
@@ -163,7 +165,7 @@ extension IAPManager {
     /// This function fetch all active transaction
     /// This functions success callback return productIds of currently active plans
     /// This function failure callback return failure message if no plan has been purchased or verified transaction is currently not active
-    func updateTransactionFeatures(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
+    func getActivePlan(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
         UserManager.shared.setUserType(type: .free)
         Task {
             var purchasedPlanIds: Set<String> = []
@@ -178,14 +180,14 @@ extension IAPManager {
                     break
                 }
             }
-            purchasedPlanIds.isEmpty ? failure("No plan purchased before") : success(Array(purchasedPlanIds))
+            purchasedPlanIds.isEmpty ? failure("No active plan available") : success(Array(purchasedPlanIds))
         }
     }
     
     /// This Function get all transaction details
     /// This function success callback return all purchased plan id
     /// This function failure callback return error message that user never purchased anything
-    func allTransactionOfUser(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
+    private func allTransactionOfUser(success: @escaping ([String]) -> Void, failure: @escaping FailureCallBack) {
         Task {
             var allPurchasedProductIds: Set<String> = []
             for await result in Transaction.all {
@@ -207,16 +209,17 @@ extension IAPManager {
     
     /// This function is for restore purchase
     /// This functions success callback return available productIds that is currently active
-    /// This function failure callback return error message if no plan has found in user account
+    /// This function failure callback return enum in which if user purchased before but that is expired, user never purchased or any other error message
     func restorePurchases(success: @escaping ([String]) -> Void, failure: @escaping ((RestoreError) -> Void)) {
         Task {
             do {
                 try await AppStore.sync()
-                self.updateTransactionFeatures(success: { purchasedProductIds in
+                self.getActivePlan(success: { purchasedProductIds in
                     DispatchQueue.main.async {
                         success(purchasedProductIds)
                     }
                 }, failure: { error in
+                    //
                     self.allTransactionOfUser(success: { _ in
                         DispatchQueue.main.async {
                             failure(.expired)
@@ -244,7 +247,7 @@ extension IAPManager {
     /// This function return success completion for productId of try to purchase product if purchased successfully
     /// This function return failure completion for any error in purchase
     @available(iOS 16.4, *)
-    func handlePromotionalOffer(success: @escaping ([String]) -> Void, failure: @escaping (PurchaseError) -> Void) {
+    private func handlePromotionalOffer(success: @escaping ([String]) -> Void, failure: @escaping (PurchaseError) -> Void) {
         Task {
             for await purchaseIntent in PurchaseIntent.intents {
                 self.purchaseProduct(purchaseIntent.product, success: { purchasedProductIds in
