@@ -159,7 +159,7 @@ extension IAPManager {
     }
 }
 
-// MARK: - Get Current Active Transaction
+// MARK: - Transaction Information Methods
 extension IAPManager {
     
     /// This function fetch all active transaction
