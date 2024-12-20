@@ -219,7 +219,7 @@ extension IAPManager {
                         success(purchasedProductIds)
                     }
                 }, failure: { error in
-                    //
+                    /// Fetching All transaction of user in this app
                     self.allTransactionOfUser(success: { _ in
                         DispatchQueue.main.async {
                             failure(.expired)
