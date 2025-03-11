@@ -1,0 +1,198 @@
+import Foundation
+import CryptoKit
+import AuthenticationServices
+import FirebaseAuth
+
+final class AppleAccountManager: NSObject {
+    static let shared = AppleAccountManager()
+    
+    private var userNounce: String = ""
+    private var successCallBack: (LoginSuccess)?
+    private var failureCallBack: ((String) -> Void)?
+    private var deleteSuccessCallBack: (() -> Void)?
+    private var isAuthForLogin = true
+    
+    private override init() { super.init() }
+}
+
+// MARK: Public Methods
+extension AppleAccountManager {
+    func loginStatus() -> Bool {
+        if let _ = Auth.auth().currentUser {
+            return true
+        } else {
+            return false
+        }
+    }
+    
+    func signOut(success: @escaping () -> Void, failure: @escaping (String) -> Void) {
+        do {
+            try Auth.auth().signOut()
+            DispatchQueue.main.async {
+                success()
+            }
+        } catch {
+            debugPrint("Error: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                failure(error.localizedDescription)
+            }
+        }
+    }
+    
+    func login(success: @escaping LoginSuccess, failure: @escaping (String) -> Void) {
+        self.isAuthForLogin = true
+        self.successCallBack = success
+        self.failureCallBack = failure
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.requestedScopes = [.fullName, .email]
+        let nonce = randomNonce()
+        self.userNounce = nonce
+        request.nonce = sha256Encryption(nonce)
+        
+        let controller = ASAuthorizationController(authorizationRequests: [request])
+        controller.delegate = self
+        controller.presentationContextProvider = self
+        controller.performRequests()
+    }
+    
+    func deleteAccount(success: @escaping () -> Void, failure: @escaping (String) -> Void) {
+        guard let _ = Auth.auth().currentUser else {
+            failure("User Not found")
+            return
+        }
+        self.isAuthForLogin = false
+        self.deleteSuccessCallBack = success
+        self.failureCallBack = failure
+        let nonce = randomNonce()
+        userNounce = nonce
+        let appleIDProvider = ASAuthorizationAppleIDProvider()
+        let request = appleIDProvider.createRequest()
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = sha256Encryption(nonce)
+        
+        let authorizationController = ASAuthorizationController(authorizationRequests: [request])
+        authorizationController.delegate = self
+        authorizationController.presentationContextProvider = self
+        authorizationController.performRequests()
+    }
+    
+    func reAuthenticate(success: @escaping () -> Void, failure: @escaping (String) -> Void) {
+        let provider = OAuthProvider(providerID: "apple.com")
+        provider.getCredentialWith(nil) { credential, error in
+            if let credential = credential {
+                Auth.auth().currentUser?.reauthenticate(with: credential) { _, error in
+                    if let error {
+                        failure(error.localizedDescription)
+                    } else {
+                        success()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: Private Methods
+extension AppleAccountManager: ASAuthorizationControllerDelegate {
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            guard let authData = self.isAuthForLogin ? appleIDCredential.identityToken : appleIDCredential.authorizationCode else { return }
+            guard let idTokenString = String(data: authData, encoding: .utf8) else { return }
+            
+            if isAuthForLogin {
+                self.loginWithApple(idTokenString: idTokenString)
+            } else {
+                self.deleteFromAppleAccount(authCodeString: idTokenString)
+            }
+        }
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        debugPrint("Authorization failed: \(error.localizedDescription)")
+        self.failureCallBack?(error.localizedDescription)
+    }
+}
+
+extension AppleAccountManager: ASAuthorizationControllerPresentationContextProviding {
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        return UIApplication.shared.delegate!.window!!
+    }
+}
+
+// MARK: Private Methods
+extension AppleAccountManager {
+    private func loginWithApple(idTokenString: String) {
+        let credential = OAuthProvider.credential(providerID: AuthProviderID.apple, idToken: idTokenString, rawNonce: self.userNounce)
+        Auth.auth().signIn(with: credential) { authResult, error in
+            DispatchQueue.main.async {
+                if let authResult {
+                    debugPrint("Signed in with Apple: \(authResult.user.uid)")
+                    self.successCallBack?(authResult.user)
+                } else {
+                    self.failureCallBack?(error?.localizedDescription ?? "Unknown error")
+                }
+            }
+        }
+    }
+    
+    private func deleteFromAppleAccount(authCodeString: String) {
+        Auth.auth().revokeToken(withAuthorizationCode: authCodeString, completion: { error in
+            if let error = error {
+                debugPrint(error.localizedDescription)
+                DispatchQueue.main.async {
+                    self.failureCallBack?(error.localizedDescription)
+                }
+            } else {
+                self.deleteCurrentUserFromFirebase(success: {
+                    self.signOut(success: {
+                        self.deleteSuccessCallBack?()
+                    }, failure: { error in
+                        self.failureCallBack?(error)
+                    })
+                }, failure: { error in
+                    self.failureCallBack?(error)
+                })
+            }
+        })
+    }
+    
+    private func deleteCurrentUserFromFirebase(success: @escaping () -> Void, failure: @escaping (String) -> Void) {
+        guard let user = Auth.auth().currentUser else {
+            failure("No User loged in")
+            return
+        }
+        user.delete(completion: { error in
+            DispatchQueue.main.async {
+                if let error {
+                    failure(error.localizedDescription)
+                } else {
+                    success()
+                }
+            }
+        })
+    }
+    
+    private func randomNonce(length: Int = 32) -> String {
+        precondition(length > 0)
+        var randomBytes = [UInt8](repeating: 0, count: length)
+        let errorCode = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
+        if errorCode != errSecSuccess {
+            fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(errorCode)")
+        }
+        let charset: [Character] =
+        Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        let nonce = randomBytes.map { byte in
+            charset[Int(byte) % charset.count]
+        }
+        return String(nonce)
+    }
+    
+    private func sha256Encryption(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        let hashString = hashedData.compactMap {
+            String(format: "%02x", $0)
+        }.joined()
+        return hashString
+    }
+}
